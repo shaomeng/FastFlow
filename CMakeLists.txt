@@ -39,20 +39,28 @@ include_directories(${CMAKE_CURRENT_BINARY_DIR})
 #
 # Download dependency: GLM
 #
-set( GLM_GZ "glm-0.9.9.8.tar.gz" )
+set( GLM_DIR "glm-0.9.9.8" )    # dictated by the result of untar
+set( GLM_GZ  "0.9.9.8.tar.gz" ) # dictated by the download page
 if( NOT EXISTS ${CMAKE_CURRENT_BINARY_DIR}/${GLM_GZ} )
-  message(STATUS "Downloading GLM...")
-  file(DOWNLOAD https://github.com/g-truc/glm/archive/refs/tags/0.9.9.8.tar.gz
+
+  message(STATUS "Downloading GLM ...")
+  file(DOWNLOAD https://github.com/g-truc/glm/archive/refs/tags/${GLM_GZ}
                 ${CMAKE_CURRENT_BINARY_DIR}/${GLM_GZ} )
+
+  if( EXISTS ${CMAKE_CURRENT_BINARY_DIR}/${GLM_DIR} )
+    execute_process(
+      COMMAND rm -rf ${GLM_DIR}
+      WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR} )
+  endif()
+
   execute_process(
-    COMMAND rm -rf glm-0.9.9.8
-    COMMAND tar xf ${GLM_GZ}
-    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-  )
+    COMMAND tar xf ${GLM_GZ} 
+    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR} )
+
 else()
-  message(STATUS "Using cached GLM...")
+  message(STATUS "Using cached GLM ...")
 endif()
-include_directories( ${CMAKE_CURRENT_BINARY_DIR}/glm-0.9.9.8/glm/include )
+include_directories( ${CMAKE_CURRENT_BINARY_DIR}/${GLM_DIR} )
 
 #
 # Download CLI11
@@ -63,14 +71,14 @@ if( NOT EXISTS ${CMAKE_CURRENT_BINARY_DIR}/CLI11.hpp )
 endif()
 
 #
-# Compile the SPERR library
+# Compile the FastFlow library
 #
 add_subdirectory( src )
 
 #
 # Create a list of libraries that can be liked by apps
 #
-#list( APPEND LINK_LIST SPERR )
+#list( APPEND LINK_LIST FastFlow )
 #list( APPEND LINK_LIST OpenMP::OpenMP_CXX )
 
 #add_subdirectory( utilities ${CMAKE_BINARY_DIR}/bin )
