@@ -1,6 +1,5 @@
 #include <iostream>
-#include "vapor/Advection.h"
-#include <fstream>
+#include "Advection.h"
 #include <algorithm>
 
 using namespace flow;
@@ -11,7 +10,7 @@ Advection::Advection() : _lowerAngle(3.0f), _upperAngle(15.0f)
     _lowerAngleCos = glm::cos(glm::radians(_lowerAngle));
     _upperAngleCos = glm::cos(glm::radians(_upperAngle));
 
-    for (int i = 0; i < 3; i++) { _isPeriodic[i] = false; }
+    for (size_t i = 0; i < 3; i++) { _isPeriodic[i] = false; }
 }
 
 void Advection::UseSeedParticles(const std::vector<Particle> &seeds)
@@ -23,24 +22,24 @@ void Advection::UseSeedParticles(const std::vector<Particle> &seeds)
     _separatorCount.assign(seeds.size(), 0);
 }
 
-int Advection::CheckReady() const
+auto Advection::SeedsReady() const -> CODE
 {
     for (const auto &s : _streams) {
-        if (s.size() < 1) return NO_SEED_PARTICLE_YET;
+        if (s.size() < 1) return CODE::NO_SEED_PARTICLE_YET;
     }
 
-    return 0;
+    return CODE::SUCCESS;
 }
 
-int Advection::AdvectSteps(Field *velocity, double deltaT, size_t maxSteps, ADVECTION_METHOD method)
+auto Advection::AdvectSteps(Field *velocity, double deltaT, size_t maxSteps, ADVECTION_METHOD method) -> CODE
 {
-    int ready = CheckReady();
-    if (ready != 0) return ready;
+    auto ready = SeedsReady();
+    if (ready != CODE::SUCCESS) return ready;
     bool happened = false;
 
     // Observation: user parameters are not gonna change while this function executes.
     // Action: lock these parameters.
-    if (velocity->LockParams() != 0) return PARAMS_ERROR;
+    if (velocity->LockParams() != CODE::SUCCESS) return PARAMS_ERROR;
 
     // The particle advection process can be parallelized per particle
     // Each stream represents a trajectory for a single particle
@@ -65,24 +64,24 @@ int Advection::AdvectSteps(Field *velocity, double deltaT, size_t maxSteps, ADVE
                     // The choice of 20.0f is just an empirical value that seems to work well.
                     double mindt = deltaT / 20.0, maxdt = deltaT * 20.0;
                     dt = past0.time - past1.time;    // step size used by last integration
-                    dt *= _calcAdjustFactor(past2, past1, past0);
-                    if (dt > 0)    // integrate forward
+                    dt *= double*(_calcAdjustFactor(past2, past1, past0));
+                    if (dt > 0.0)    // integrate forward
                         dt = glm::clamp(dt, mindt, maxdt);
-                    else    // integrate backward
+                    else             // integrate backward
                         dt = glm::clamp(dt, maxdt, mindt);
                 }
             }
 
             Particle p1;
-            int      rv = 0;
+            auto rv = CODE::SUCCESS;
             switch (method) {
             case ADVECTION_METHOD::EULER: rv = _advectEuler(velocity, past0, dt, p1); break;
             case ADVECTION_METHOD::RK4: rv = _advectRK4(velocity, past0, dt, p1); break;
             }
 
-            if (rv == 0) {    // Advection successful!
-                // The new particle *may* be the same as the old particle in case
-                // there's a sink, meaning the velocity is zero.
+            if (rv == CODE::SUCCESS) {    // Advection successful!
+                // The new particle *may* be the same as the old particle in case there's a sink, 
+                // meaning the velocity is zero.
                 // In that case, we mark p1 as "special" and terminate the current stream.
                 if (p1.location == past0.location) {
                     p1.SetSpecial(true);
@@ -94,7 +93,7 @@ int Advection::AdvectSteps(Field *velocity, double deltaT, size_t maxSteps, ADVE
                     s.emplace_back(p1);
                     numberOfSteps++;
                 }
-            } else if (rv == MISSING_VAL) {
+            } else if (rv == CODE::MISSING_VAL) {
                 // This is the annoying part: there are multiple possiblities.
                 // 1) past0 is really located at a missing value location;
                 // 2) past0 is inside the volume, but really close to the boundary,
@@ -121,7 +120,7 @@ int Advection::AdvectSteps(Field *velocity, double deltaT, size_t maxSteps, ADVE
                 } else if (isInside && (!isMissing)) {    // Case 2)
                     // Use Euler advection for this particle.
                     rv = _advectEuler(velocity, past0, dt, p1);
-                    assert(rv == 0);
+                    assert(rv == CODE::SUCCESS);
                     s.emplace_back(p1);
                     numberOfSteps++;
                 } else {    // Case 3)
@@ -137,7 +136,8 @@ int Advection::AdvectSteps(Field *velocity, double deltaT, size_t maxSteps, ADVE
                     } else {
                         auto loc = past0.location;
                         for (int i = 0; i < 3; i++) {
-                            if (_isPeriodic[i]) loc[i] = _applyPeriodic(loc[i], _periodicBounds[i][0], _periodicBounds[i][1]);
+                            if (_isPeriodic[i]) 
+                              loc[i] = _applyPeriodic(loc[i], _periodicBounds[i * 2], _periodicBounds[i * 2 + 1]);
                         }
 
                         // Notice that loc isn't guaranteed to be inside the volume right now,
@@ -158,7 +158,6 @@ int Advection::AdvectSteps(Field *velocity, double deltaT, size_t maxSteps, ADVE
                         }
                     }
                 }
-
             }       // end (rv == MISSING_VAL) condition
             else    // Advection wasn't successful for other reasons
                 break;
@@ -169,15 +168,16 @@ int Advection::AdvectSteps(Field *velocity, double deltaT, size_t maxSteps, ADVE
     velocity->UnlockParams();
 
     if (happened)
-        return ADVECT_HAPPENED;
+        return CODE::ADVECT_HAPPENED;
     else
-        return NO_ADVECT_HAPPENED;
+        return CODE::NO_ADVECT_HAPPENED;
 }
 
-int Advection::AdvectTillTime(Field *velocity, double startT, double deltaT, double targetT, ADVECTION_METHOD method)
+auto Advection::AdvectTillTime(Field *velocity, double startT, double deltaT, double targetT, 
+                               ADVECTION_METHOD method) ->CODE
 {
-    int ready = CheckReady();
-    if (ready != 0) return ready;
+    auto ready = SeedsReady();
+    if (ready != CODE::SUCCESS) return ready;
 
     bool   happened = false;
     size_t streamIdx = 0;
@@ -198,9 +198,9 @@ int Advection::AdvectTillTime(Field *velocity, double startT, double deltaT, dou
                 auto itr = s.end();
                 --itr;    // pointing to the last element
                 auto loc = itr->location;
-                for (int i = 0; i < 3; i++) {
+                for (size_t i = 0; i < 3; i++) {
                     if (_isPeriodic[i]) {
-                        loc[i] = _applyPeriodic(loc[i], _periodicBounds[i][0], _periodicBounds[i][1]);
+                        loc[i] = _applyPeriodic(loc[i], _periodicBounds[i * 2], _periodicBounds[i * 2 + 1]);
                         locChanged = true;
                     }
                 }
@@ -231,18 +231,18 @@ int Advection::AdvectTillTime(Field *velocity, double startT, double deltaT, dou
                 const auto &past2 = s[s.size() - 3];
                 if ((!past1.IsSpecial()) && (!past2.IsSpecial())) {
                     dt = p0.time - past1.time;    // step size used by last integration
-                    dt *= _calcAdjustFactor(past2, past1, p0);
+                    dt *= double(_calcAdjustFactor(past2, past1, p0));
                     dt = glm::clamp(dt, mindt, maxdt);
                 }
             }
 
             Particle p1;
-            int      rv = 0;
+            auto rv = CODE::SUCCESS;
             switch (method) {
             case ADVECTION_METHOD::EULER: rv = _advectEuler(velocity, p0, dt, p1); break;
             case ADVECTION_METHOD::RK4: rv = _advectRK4(velocity, p0, dt, p1); break;
             }
-            if (rv != 0) {    // Advection wasn't successful for some reason...
+            if (rv != CODE::SUCCESS) {    // Advection wasn't successful for some reason...
                 break;
             } else {    // Advection successful, keep the new particle.
                 happened = true;
@@ -266,12 +266,12 @@ int Advection::AdvectTillTime(Field *velocity, double startT, double deltaT, dou
     }    // Finish advecting all particles
 
     if (happened)
-        return ADVECT_HAPPENED;
+        return CODE::ADVECT_HAPPENED;
     else
-        return 0;
+        return CODE::SUCCESS;
 }
 
-int Advection::CalculateParticleValues(Field *scalar, bool skipNonZero)
+auto Advection::CalculateParticleValues(Field *scalar, bool skipNonZero) -> CODE
 {
     // For steady fields, we calculate values one stream at a time
     if (scalar->IsSteady) {
@@ -412,7 +412,7 @@ int Advection::_advectRK4(Field *velocity, const Particle &p0, double dt, Partic
     return 0;
 }
 
-float Advection::_calcAdjustFactor(const Particle &p2, const Particle &p1, const Particle &p0) const
+float Advection::_calcAdjustFactor(Particle p2, Particle p1, Particle p0) const
 {
     glm::vec3 p2p1 = p1.location - p2.location;
     glm::vec3 p1p0 = p0.location - p1.location;
@@ -507,20 +507,20 @@ void Advection::SetZPeriodicity(bool isPeri, float min, float max)
         _periodicBounds[2] = glm::vec2(0.0f);
 }
 
-float Advection::_applyPeriodic(float val, float min, float max) const
+float Advection::_applyPeriodic(float loc, float min, float max) const
 {
-    if (min >= max)    // ill params, return val
-        return val;
-    else if (val >= min && val <= max)    // nothing needs to change
-        return val;
+    if (min >= max)    // ill params, return loc
+        return loc;
+    else if (loc >= min && loc <= max)    // nothing needs to change
+        return loc;
 
     // Let's do some serious work
     float span = max - min;
-    float pval = val;
-    if (val < min) {
+    float pval = loc;
+    if (loc < min) {
         while (pval < min) pval += span;
         return pval;
-    } else    // val > max
+    } else    // loc > max
     {
         while (pval > max) pval -= span;
         return pval;

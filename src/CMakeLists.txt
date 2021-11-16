@@ -1,7 +1,8 @@
 
 add_library( FastFlow
              Particle.cpp
-             Field.cpp )
+             Field.cpp
+             Advection.cpp )
 target_include_directories( FastFlow PUBLIC ${CMAKE_SOURCE_DIR}/include )
 set_target_properties( FastFlow PROPERTIES VERSION ${FastFlow_VERSION} )
 
@@ -10,8 +11,8 @@ set_target_properties( FastFlow PROPERTIES VERSION ${FastFlow_VERSION} )
 #
 set( public_h_list 
 "include/Particle.h;\
-include/Field.h")
-#include/SPERR.h;")
+include/Field.h;\
+include/Advection.h")
 
 set_target_properties( FastFlow PROPERTIES PUBLIC_HEADER "${public_h_list}" )
 
